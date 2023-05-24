@@ -65,8 +65,8 @@ def run(kind, key, size="100K", k=30):
 
 	data_file = os.path.join("data", kind, size, "dataset.h5")
 	queries_file = os.path.join("data", kind, size, "query.h5")
-	data_shape = h5py.File(data_file).shape
-	queries_shape = h5py.File(queries_file).shape
+	data_shape = h5py.File(data_file)[key].shape
+	queries_shape = h5py.File(queries_file)[key].shape
 
 	print(f"Training index on {data_shape}")
 	index_identifier = "StochasticHIOB"
@@ -83,7 +83,7 @@ def run(kind, key, size="100K", k=30):
 	)
 	total_its = 30_000
 	h.run(total_its)
-	data_bin = h.binarize_h5(data_file)
+	data_bin = h.binarize_h5(data_file, key, 300_000)
 	end = time.time()
 	elapsed_build = end - start
 	print(f"Done training in {elapsed_build}s.")
