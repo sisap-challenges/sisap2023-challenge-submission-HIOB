@@ -1,3 +1,6 @@
 [submodule "hiob"]
 	path = hiob
 	url = https://github.com/eth42/hiob
+[submodule "eval"]
+	path = eval
+	url = https://github.com/sisap-challenges/sisap23-laion-challenge-evaluation
