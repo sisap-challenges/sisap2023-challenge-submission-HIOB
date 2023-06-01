@@ -93,7 +93,6 @@ def run(kind, key, size="100K", k=30, ram_mode=False, n_bits=1024, n_its=30_000,
 			sample_size=sample_size,
 			its_per_sample=its_per_sample,
 			init_ransac=True,
-			input_type=np.float32,
 		)
 		h.run(n_its)
 		data_bin = h.binarize(data)
