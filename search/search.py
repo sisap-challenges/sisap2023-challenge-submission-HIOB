@@ -6,8 +6,13 @@ import os
 from pathlib import Path
 from urllib.request import urlretrieve
 import time
+import itertools
+import tqdm
 
 PRODUCTION_MODE = True
+
+import multiprocessing
+hiob.limit_threads(multiprocessing.cpu_count()-2)
 
 # Download a single h5 file to the specified destination if not already available
 def download_if_missing(file_url, file_path):
@@ -57,7 +62,7 @@ def store_results(
 	f.close()
 
 # Run 
-def run(kind, key, size="100K", k=30, ram_mode=False, n_bits=1024, n_its=30_000, sample_size=10_000, its_per_sample=1024):
+def run(kind, key, size="100K", k=30, ram_mode=False, n_bitss=[1024], n_its=30_000, sample_size=10_000, its_per_sample=1024, noise_std=None):
 	print("Running", kind)
 	if not kind.startswith("clip"):
 		raise ValueError(f"unsupported input type {kind}")
@@ -68,55 +73,98 @@ def run(kind, key, size="100K", k=30, ram_mode=False, n_bits=1024, n_its=30_000,
 	data_shape = h5py.File(data_file)[key].shape
 	queries_shape = h5py.File(queries_file)[key].shape
 
-	print(f"Training index on {data_shape} with {n_bits} bits")
-	index_identifier = "StochasticHIOB(n_bits={:},n_its={:},n_samples={:},batch_its={:})".format(n_bits, n_its, sample_size, its_per_sample)
+	print(f"Training index on {data_shape} with {n_bitss} bits")
+	index_identifier = "StochasticHIOB(n_bits={:},n_its={:},n_samples={:},batch_its={:},noise_std={:.4})".format(n_bitss, n_its, sample_size, its_per_sample, 0. if noise_std is None else noise_std)
 	start = time.time()
-	if not ram_mode:
-		h = hiob.StochasticHIOB.from_h5_file(
-			file=data_file,
-			dataset=key,
-			n_bits=n_bits,
-			scale=.1,
-			sample_size=sample_size,
-			its_per_sample=its_per_sample,
-			init_ransac=True,
-			input_type=np.float32,
-		)
-		h.run(n_its)
-		data_bin = h.binarize_h5(data_file, key, 300_000)
-	else:
-		data = np.array(h5py.File(data_file)[key]).astype(np.float32)
-		h = hiob.StochasticHIOB.from_ndarray(
-			X=data,
-			n_bits=n_bits,
-			scale=.1,
-			sample_size=sample_size,
-			its_per_sample=its_per_sample,
-			init_ransac=True,
-		)
-		h.run(n_its)
-		data_bin = h.binarize(data)
+	hs = []
+	data_bins = []
+	for n_bits in n_bitss:
+		if not ram_mode:
+			h = hiob.StochasticHIOB.from_h5_file(
+				file=data_file,
+				dataset=key,
+				n_bits=n_bits,
+				scale=.1,
+				sample_size=sample_size,
+				its_per_sample=its_per_sample,
+				init_ransac=True,
+				input_type=np.float32,
+				noise_std=noise_std,
+			)
+			with tqdm.tqdm(total=n_its) as bar:
+				batch_size=100
+				for _ in range(n_its//batch_size):
+					h.run(batch_size)
+					bar.update(batch_size)
+					bar.refresh()
+			data_bin = h.binarize_h5(data_file, key, 500_000)
+		else:
+			data = np.array(h5py.File(data_file)[key]).astype(np.float32)
+			h = hiob.StochasticHIOB.from_ndarray(
+				X=data,
+				n_bits=n_bits,
+				scale=.1,
+				sample_size=sample_size,
+				its_per_sample=its_per_sample,
+				init_ransac=True,
+				noise_std=noise_std,
+			)
+			with tqdm.tqdm(total=n_its) as bar:
+				batch_size=100
+				for _ in range(n_its//batch_size):
+					h.run(batch_size)
+					bar.update(batch_size)
+					bar.refresh()
+			data_bin = h.binarize(data)
+		hs.append(h)
+		data_bins.append(data_bin)
 	end = time.time()
 	elapsed_build = end - start
-	print(f"Done training in {elapsed_build}s.")
+	print(f"Done training in {elapsed_build:.3}s.")
 
-	for nprobe in np.round(np.exp(np.linspace(np.log(k), np.log(1000*k), 21))).astype(int):
+	nprobe_vals = np.round(np.exp(np.linspace(np.log(k), np.log(1000*k), 21))).astype(int)
+	# nprobe_vals = np.round(np.exp(np.linspace(np.log(10_000), np.log(800_000), 11))).astype(int)
+	nprobe_groups = list(map(list,itertools.combinations(nprobe_vals,len(n_bitss))))
+	# nprobe_groups = [
+	# 	[a,b]
+	# 	for a in np.round(np.exp(np.linspace(np.log(250), np.log(400), 6))).astype(int)
+	# 	for b in np.round(np.exp(np.linspace(np.log(100_000), np.log(800_000), 11))).astype(int)
+	# ]
+	# for nprobe in nprobe_vals:
 	# for nprobe in [50, 100, 150, 250, 450, 500, 600]:
-		print(f"Starting search on {queries_shape} with nprobe={nprobe}")
+	for nprobes in nprobe_groups:
+		print(f"Starting search on {queries_shape} with nprobes={nprobes}")
+		nprobes = nprobes[::-1] # Revert order to filter the largest set first
 		start = time.time()
 		queries = np.array(h5py.File(queries_file)[key]).astype(np.float32)
-		queries_bin = h.binarize(queries)
+		end = time.time()
+		elapsed_search = end - start
+		print(f"Queries loaded after {elapsed_search:.3}s.")
+		queries_bins = [h.binarize(queries) for h in hs]
+		end = time.time()
+		elapsed_search = end - start
+		print(f"Queries binarized after {elapsed_search:.3}s.")
 		bin_eval = hiob.BinarizationEvaluator()
 		# Query nearest neighbors as per cosine similarity
 		if not ram_mode:
-			neighbor_dots, neighbor_ids = bin_eval.query_h5(data_file, key, data_bin, queries, queries_bin, k, nprobe, chunk_size=300_000)
+			neighbor_dots, neighbor_ids = bin_eval.query_cascade_h5(
+				data_file, key, data_bins,
+				queries, queries_bins,
+				k, nprobes,
+				chunk_size=max(10, int(np.ceil(queries.shape[0] / hiob.num_threads() / 2)))
+			)
 		else:
-			neighbor_dots, neighbor_ids = bin_eval.query(data, data_bin, queries, queries_bin, k, nprobe)
+			neighbor_dots, neighbor_ids = bin_eval.query_cascade(
+				data, data_bins,
+				queries, queries_bins,
+				k, nprobes,
+				chunk_size=int(np.ceil(queries.shape[0] / hiob.num_threads()))
+			)
 		# Translate cosines into distances
 		neighbor_dists = np.sqrt(np.maximum(0, 2-2*neighbor_dots))
 		end = time.time()
 		elapsed_search = end - start
-		print(f"Done searching in {elapsed_search}s.")
+		print(f"Done searching in {elapsed_search:.3}s.")
 		# HIOB is 0-indexed, groundtruth is 1-indexed
 		neighbor_ids += 1
 		# Generate parameter string for this call
@@ -128,7 +176,7 @@ def run(kind, key, size="100K", k=30, ram_mode=False, n_bits=1024, n_its=30_000,
 					["its_per_sample", h.its_per_sample],
 				]
 			]),
-			nprobe,
+			nprobes,
 		)
 		# Store results for this run
 		store_results(
@@ -161,6 +209,7 @@ if __name__ == "__main__":
 		default=True,
 		help="Whether or not to load the entire dataset into RAM. If false, will only load as much data from disk at any time as required for execution",
 		type=bool,
+		action=argparse.BooleanOptionalAction,
 	)
 	parser.add_argument(
 		"--its",
@@ -170,9 +219,9 @@ if __name__ == "__main__":
 	)
 	parser.add_argument(
 		"--bits",
-		default=1024,
+		default="1024",
 		help="How many bits to use in binarization",
-		type=int,
+		type=str,
 	)
 	parser.add_argument(
 		"--batch_its",
@@ -186,11 +235,18 @@ if __name__ == "__main__":
 		help="How many samples to use in each stochastic batch",
 		type=int,
 	)
+	parser.add_argument(
+		"--noise",
+		default=None,
+		help="Standard deviation of noise to add to stochastic subsamples",
+		type=float,
+	)
 
 	args = parser.parse_args()
 
 	assert args.size in ["100K", "300K", "10M", "30M", "100M"]
 
+	print("RAM Mode={:}".format(args.ram))
 	# run("pca32v2", "pca32", args.size, args.k)
 	# run("pca96v2", "pca96", args.size, args.k)
 	# run("hammingv2", "hamming", args.size, args.k)
@@ -199,7 +255,8 @@ if __name__ == "__main__":
 		args.size, args.k,
 		ram_mode=args.ram,
 		n_its=args.its,
-		n_bits=args.bits,
+		n_bitss=[int(s) for s in args.bits.split(",")],
 		sample_size=args.samples,
 		its_per_sample=args.batch_its,
+		noise_std=args.noise,
 	)
