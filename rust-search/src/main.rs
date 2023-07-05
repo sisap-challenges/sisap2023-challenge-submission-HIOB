@@ -161,10 +161,15 @@ fn read_h5py_source(source: &H5PyDataset<f32>, batch_size: usize) -> Array2<f32>
 	data
 }
 fn time_format(seconds: f64) -> String {
-	match (seconds < 60f64, seconds < 3600f64) {
-		(true, _) => format!("{:.3}s", seconds),
-		(false, true) => format!("{:.0}m{:.3}s", seconds/60f64, seconds%60f64),
-		(false, false) => format!("{:.0}h{:.0}m{:.3}s", seconds/3600f64, (seconds/60f64)%60f64, seconds%60f64),
+	let ms = ((seconds%1f64)*1000f64).floor();
+	let s = (seconds%60f64).floor();
+	let m = ((seconds/60f64)%60f64).floor();
+	let h = (seconds/3600f64).floor();
+	match (s < 1f64, m < 1f64, h < 1f64) {
+		(true, _, _) => format!("{:.0}ms", ms),
+		(false, true, _) => format!("{:.0}s{:03.0}ms", s, ms),
+		(false, false, true) => format!("{:.0}m{:02.0}s{:03.0}ms", m, s, ms),
+		(false, false, false) => format!("{:.0}h{:02.0}m{:02.0}s{:03.0}ms", h, m, s, ms),
 	}
 }
 
