@@ -45,3 +45,28 @@ pub fn open_hdf5(file_path: &str) -> Res<File> {
 	let result = File::open(file_path)?;
 	Ok(result)
 }
+
+
+// Store the output values as required in the task specification
+fn store_results<T: H5Type>(
+	out_file: &str,
+	kind: &str,
+	size: &str,
+	alg_name: &str,
+	parameter_string: &str,
+	neighbor_dists: Array2<T>,
+	neighbor_ids: Array2<usize>,
+	build_time: f64,
+	query_time: f64,
+) -> NoRes {
+	H5Builder::new(out_file)?
+	.with_dataset("dists", &neighbor_dists)?
+	.with_dataset("knns", &neighbor_ids)?
+	.with_str_attr("algo", alg_name)?
+	.with_str_attr("data", kind)?
+	.with_str_attr("size", size)?
+	.with_str_attr("params", parameter_string)?
+	.with_num_attr("buildtime", build_time)?
+	.with_num_attr("querytime", query_time)?;
+	Ok(())
+}

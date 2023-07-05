@@ -20,12 +20,15 @@ use num_traits::cast::NumCast;
 use rayon::iter::ParallelIterator;
 
 mod fs_fun;
-mod hdf5_fun;
+// mod hdf5_fun;
+mod h5py_fun;
 mod cli;
 
 use crate::fs_fun::{download_if_missing};
-use crate::hdf5_fun::{H5Builder};//, open_hdf5};
+// use crate::hdf5_fun::store_results;
+use crate::h5py_fun::store_results;
 use crate::cli::{Cli};
+// use crate::h5py_fun::{get_h5py_shape, get_h5py_slice_f32};
 
 const PRODUCTION_MODE: bool = true;
 
@@ -62,29 +65,6 @@ fn result_path(out_base_path: &str, kind: &str, size: &str, index_identifier: &s
 	format!("{}/{}/{}/{}/{}.h5", out_base_path, kind, size, index_identifier, param_string)
 }
 
-// Store the output values as required in the task specification
-fn store_results<T: hdf5::H5Type>(
-	out_file: &str,
-	kind: &str,
-	size: &str,
-	alg_name: &str,
-	parameter_string: &str,
-	neighbor_dists: &Array2<T>,
-	neighbor_ids: &Array2<usize>,
-	build_time: f64,
-	query_time: f64,
-) -> NoRes {
-	H5Builder::new(out_file)?
-	.with_dataset("dists", neighbor_dists)?
-	.with_dataset("knns", neighbor_ids)?
-	.with_str_attr("algo", alg_name)?
-	.with_str_attr("data", kind)?
-	.with_str_attr("size", size)?
-	.with_str_attr("params", parameter_string)?
-	.with_num_attr("buildtime", build_time)?
-	.with_num_attr("querytime", query_time)?;
-	Ok(())
-}
 
 
 struct Timer {
@@ -120,7 +100,7 @@ fn logspace<T: NumCast+Copy+Clone>(start: T, end: T, n_vals: usize) -> Vec<T> {
 	let fstart: f64 = <f64 as NumCast>::from(start.clone()).unwrap();
 	let fend: f64 = <f64 as NumCast>::from(end.clone()).unwrap();
 	let lstart = fstart.ln();
-	let lend = fstart.ln();
+	let lend = fend.ln();
 	let mut vals: Vec<T> = linspace(lstart, lend, n_vals)
 	.iter()
 	.map(|lval| lval.exp())
@@ -132,6 +112,30 @@ fn logspace<T: NumCast+Copy+Clone>(start: T, end: T, n_vals: usize) -> Vec<T> {
 	vals
 }
 
+
+// fn read_h5py_source(file: &str, dataset: &str, batch_size: usize) -> Res<Array2<f32>> {
+// 	let data_shape = get_h5py_shape(file, dataset)?;
+// 	let mut data = Array2::from_elem((data_shape[0], data_shape[1]), 0f32);
+// 	let n_batches = (data_shape[0]+(batch_size-1)) / batch_size;
+// 	par_iter(
+// 		(0..n_batches)
+// 		.map(|i_batch| {
+// 			let batch_start = batch_size * i_batch;
+// 			let batch_end = (batch_start + batch_size).min(data_shape[0]);
+// 			(batch_start, batch_end)
+// 		})
+// 		.zip(data.axis_chunks_iter_mut(Axis(0), batch_size))
+// 	)
+// 	.for_each(|((batch_start, batch_end), mut data_chunk)| {
+// 		let batch = get_h5py_slice_f32(file, dataset, batch_start, batch_end).unwrap();
+// 		batch.axis_iter(Axis(0))
+// 		.zip(data_chunk.axis_iter_mut(Axis(0)))
+// 		.for_each(|(from, mut to)| {
+// 			to.assign(&from);
+// 		});
+// 	});
+// 	Ok(data)
+// }
 
 fn read_h5py_source(source: &H5PyDataset<f32>, batch_size: usize) -> Array2<f32> {
 	let data_shape = [source.n_rows(), source.n_cols()];
@@ -184,10 +188,15 @@ fn run_experiment(
 
 	assert!(ram_mode);
 
-	let data_file: H5PyDataset<f32> = H5PyDataset::new(dataset_path(in_base_path, kind, size).as_str(), key);
-	let queries_file: H5PyDataset<f32> = H5PyDataset::new(queries_path(in_base_path, kind, size).as_str(), key);
+	let data_path = dataset_path(in_base_path, kind, size);
+	let queries_path = queries_path(in_base_path, kind, size);
+	let data_file: H5PyDataset<f32> = H5PyDataset::new(data_path.as_str(), key);
+	let queries_file: H5PyDataset<f32> = H5PyDataset::new(queries_path.as_str(), key);
+	// let data_shape = get_h5py_shape(data_path.as_str(), key)?;
+	// let queries_shape = get_h5py_shape(queries_path.as_str(), key)?;
 	let data_shape = [data_file.n_rows(), data_file.n_cols()];
 	let queries_shape = [queries_file.n_rows(), queries_file.n_cols()];
+
 
 	/* Training */
 	println!("Training index on {:?} with {:?} bits",data_shape,n_bitss);
@@ -203,6 +212,7 @@ fn run_experiment(
 	);
 	/* Loading data */
 	let data_load_timer = Timer::new();
+	// let data = read_h5py_source(data_path.as_str(), key, 300_000)?;
 	let data = read_h5py_source(&data_file, 300_000);
 	println!("Data loaded in {:}", data_load_timer.elapsed_str());
 	/* Training HIOBs */
@@ -216,7 +226,7 @@ fn run_experiment(
 			its_per_sample,
 			*n_bitss.get(i_hiob).unwrap(),
 			None,
-			None,
+			Some(0.1),
 			None,
 			None,
 			Some(true),
@@ -246,6 +256,7 @@ fn run_experiment(
 		/* Loading queries */
 		let queries_load_timer = Timer::new();
 		let queries = read_h5py_source(&queries_file, 300_000);
+		// let queries = read_h5py_source(queries_path.as_str(), key, 300_000)?;
 		println!("Queries loaded in {:}", queries_load_timer.elapsed_str());
 		/* Binarize queries */
 		let queries_bin_timer = Timer::new();
@@ -289,8 +300,8 @@ fn run_experiment(
 			size,
 			format!("{} + brute-force", index_identifier).as_str(),
 			param_string.as_str(),
-			&neighbor_dists,
-			&neighbor_ids,
+			neighbor_dists,
+			neighbor_ids,
 			build_time,
 			query_time,
 		)?;
