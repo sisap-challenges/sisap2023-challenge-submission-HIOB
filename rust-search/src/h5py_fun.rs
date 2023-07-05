@@ -91,6 +91,8 @@ pub fn store_results(
 	parameter_string: &str,
 	neighbor_dists: Array2<f32>,
 	neighbor_ids: Array2<usize>,
+	data_bin: &Array2<u64>,
+	query_bin: &Array2<u64>,
 	build_time: f64,
 	query_time: f64,
 ) -> NoRes {
@@ -99,6 +101,8 @@ pub fn store_results(
 		H5PyBuilder::new(py, out_file)?
 		.with_dataset("dists", neighbor_dists, "float32")?
 		.with_dataset("knns", neighbor_ids, "uint64")?
+		.with_dataset("db", data_bin.clone(), "uint64")?
+		.with_dataset("queries", query_bin.clone(), "uint64")?
 		.with_attr_str("algo", alg_name)?
 		.with_attr_str("data", kind)?
 		.with_attr_str("size", size)?

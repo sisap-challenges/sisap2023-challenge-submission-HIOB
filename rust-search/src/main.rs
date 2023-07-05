@@ -302,6 +302,8 @@ fn run_experiment(
 			param_string.as_str(),
 			neighbor_dists,
 			neighbor_ids,
+			&data_bins[data_bins.len()-1],
+			&queries_bins[data_bins.len()-1],
 			build_time,
 			query_time,
 		)?;

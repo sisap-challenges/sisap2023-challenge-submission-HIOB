@@ -56,12 +56,16 @@ fn store_results<T: H5Type>(
 	parameter_string: &str,
 	neighbor_dists: Array2<T>,
 	neighbor_ids: Array2<usize>,
+	data_bin: &Array2<u64>,
+	query_bin: &Array2<u64>,
 	build_time: f64,
 	query_time: f64,
 ) -> NoRes {
 	H5Builder::new(out_file)?
 	.with_dataset("dists", &neighbor_dists)?
 	.with_dataset("knns", &neighbor_ids)?
+	.with_dataset("db", neighbor_dists)?
+	.with_dataset("queries", neighbor_ids)?
 	.with_str_attr("algo", alg_name)?
 	.with_str_attr("data", kind)?
 	.with_str_attr("size", size)?
