@@ -9,13 +9,15 @@ use hiob::{
 	data::MatrixDataSource,
 	binarizer::StochasticHIOB,
 	eval::BinarizationEvaluator,
+	progress::par_iter,
 };
-use ndarray::{Axis, Slice, Array2, ArrayView2};
+use ndarray::{Axis, Array2};
 use clap::Parser;
 use std::str::FromStr;
 use std::time::Instant;
 use itertools::Itertools;
 use num_traits::cast::NumCast;
+use rayon::iter::ParallelIterator;
 
 mod fs_fun;
 mod hdf5_fun;
@@ -95,6 +97,9 @@ impl Timer {
 	fn elapsed_s(&self) -> f64 {
 		self.start.elapsed().as_secs_f64()
 	}
+	fn elapsed_str(&self) -> String {
+		time_format(self.start.elapsed().as_secs_f64())
+	}
 }
 
 
@@ -132,17 +137,31 @@ fn read_h5py_source(source: &H5PyDataset<f32>, batch_size: usize) -> Array2<f32>
 	let data_shape = [source.n_rows(), source.n_cols()];
 	let mut data = Array2::from_elem(data_shape, 0f32);
 	let n_batches = (data_shape[0]+(batch_size-1)) / batch_size;
-	(0..n_batches).for_each(|i_batch| {
-		let batch_start = batch_size * i_batch;
-		let batch_end = (batch_start + batch_size).min(data_shape[1]);
+	par_iter(
+		(0..n_batches)
+		.map(|i_batch| {
+			let batch_start = batch_size * i_batch;
+			let batch_end = (batch_start + batch_size).min(data_shape[0]);
+			(batch_start, batch_end)
+		})
+		.zip(data.axis_chunks_iter_mut(Axis(0), batch_size))
+	)
+	.for_each(|((batch_start, batch_end), mut data_chunk)| {
 		let batch = source.get_rows_slice(batch_start, batch_end);
 		batch.axis_iter(Axis(0))
-		.zip(data.slice_axis_mut(Axis(0), Slice::from(batch_start..batch_end)).axis_iter_mut(Axis(0)))
+		.zip(data_chunk.axis_iter_mut(Axis(0)))
 		.for_each(|(from, mut to)| {
 			to.assign(&from);
 		});
 	});
 	data
+}
+fn time_format(seconds: f64) -> String {
+	match (seconds < 60f64, seconds < 3600f64) {
+		(true, _) => format!("{:.3}s", seconds),
+		(false, true) => format!("{:.0}m{:.3}s", seconds/60f64, seconds%60f64),
+		(false, false) => format!("{:.0}h{:.0}m{:.3}s", seconds/3600f64, (seconds/60f64)%60f64, seconds%60f64),
+	}
 }
 
 
@@ -185,14 +204,14 @@ fn run_experiment(
 	/* Loading data */
 	let data_load_timer = Timer::new();
 	let data = read_h5py_source(&data_file, 300_000);
-	println!("Data loaded in {:.3}s", data_load_timer.elapsed_s());
+	println!("Data loaded in {:}", data_load_timer.elapsed_str());
 	/* Training HIOBs */
 	let mut hs = vec![];
 	let mut data_bins = vec![];
 	(0..n_bitss.len()).for_each(|i_hiob| {
 		let init_timer = Timer::new();
-		let mut h: StochasticHIOB<f32, u64, ArrayView2<f32>> = StochasticHIOB::new(
-			data.view(),
+		let mut h: StochasticHIOB<f32, u64, &Array2<f32>> = StochasticHIOB::new(
+			&data,
 			sample_size,
 			its_per_sample,
 			*n_bitss.get(i_hiob).unwrap(),
@@ -205,18 +224,18 @@ fn run_experiment(
 			None,
 			if noise_std > 0f32 { Some(noise_std) } else { None },
 		);
-		println!("Stochastic HIOB {} initialized in {:.3}s", i_hiob+1, init_timer.elapsed_s());
+		println!("Stochastic HIOB {} initialized in {:}", i_hiob+1, init_timer.elapsed_str());
 		let init_timer = Timer::new();
 		h.run(n_its);
-		println!("Stochastic HIOB {} trained in {:.3}s", i_hiob+1, init_timer.elapsed_s());
+		println!("Stochastic HIOB {} trained in {:}", i_hiob+1, init_timer.elapsed_str());
 		let init_timer = Timer::new();
 		let data_bin = h.binarize(&data);
-		println!("Data binarized with HIOB {} in {:.3}s", i_hiob+1, init_timer.elapsed_s());
+		println!("Data binarized with HIOB {} in {:}", i_hiob+1, init_timer.elapsed_str());
 		hs.push(h);
 		data_bins.push(data_bin);
 	});
 	let build_time = build_timer.elapsed_s();
-	println!("Done training in {:.3}s.", build_time.clone());
+	println!("Done training in {:}.", time_format(build_time.clone()));
 	
 	let nprobe_vals = logspace(k, 1000*k, 21);
 	let nprobe_groups: Vec<Vec<usize>> = nprobe_vals.clone().into_iter().rev().combinations(n_bitss.len()).collect();
@@ -227,13 +246,13 @@ fn run_experiment(
 		/* Loading queries */
 		let queries_load_timer = Timer::new();
 		let queries = read_h5py_source(&queries_file, 300_000);
-		println!("Queries loaded in {:.3}s", queries_load_timer.elapsed_s());
+		println!("Queries loaded in {:}", queries_load_timer.elapsed_str());
 		/* Binarize queries */
 		let queries_bin_timer = Timer::new();
 		let queries_bins: Vec<Array2<u64>> = hs.iter()
 		.map(|h| h.binarize(&queries))
 		.collect();
-		println!("Queries binarized in {:.3}s", queries_bin_timer.elapsed_s());
+		println!("Queries binarized in {:}", queries_bin_timer.elapsed_str());
 		/* Perform query */
 		let query_call_timer = Timer::new();
 		let chunk_size = (queries_shape[0]+num_threads()*2-1)/(num_threads()*2);
@@ -246,12 +265,12 @@ fn run_experiment(
 			nprobes,
 			Some(chunk_size),
 		);
-		println!("Queries executed in {:.3}s", query_call_timer.elapsed_s());
+		println!("Queries executed in {:}", query_call_timer.elapsed_str());
 		/* Modify dot products to euclidean distances and change to 1-based index */
 		neighbor_dists.mapv_inplace(|v| 0f32.max(2f32-2f32*v).sqrt());
 		neighbor_ids.mapv_inplace(|v| v+1);
 		let query_time = query_timer.elapsed_s();
-		println!("Overall query time: {:.3}s", query_time.clone());
+		println!("Overall query time: {:}", time_format(query_time.clone()));
 		/* Create parameter string and store results */
 		let param_string = format!(
 			"index_params=({:}),query_params=(nprobe={:?})",
@@ -275,7 +294,7 @@ fn run_experiment(
 			build_time,
 			query_time,
 		)?;
-		println!("Wrote results to disk in {:.3}s", storage_timer.elapsed_s());
+		println!("Wrote results to disk in {:}", storage_timer.elapsed_str());
 	}
 	Ok(())
 }
