@@ -11,7 +11,7 @@ use hiob::{
 	eval::BinarizationEvaluator,
 	progress::par_iter,
 };
-use ndarray::{Axis, Array2};
+use ndarray::{Axis, Array2, Slice};
 use clap::Parser;
 use std::str::FromStr;
 use std::time::Instant;
@@ -208,7 +208,7 @@ fn run_experiment(
 	let build_timer = Timer::new();
 	/* Creating string handle for experiment */
 	let index_identifier = format!(
-		"StochasticHIOB(n_bits={:?},n_its={:},n_samples={:},batch_its={:},noise_std={:.4})",
+		"StochasticHIOB(n_bits={:?},n_its={:},n_samples={:},batch_its={:},noise_std={:})",
 		n_bitss,
 		n_its,
 		sample_size,
@@ -252,7 +252,7 @@ fn run_experiment(
 	let build_time = build_timer.elapsed_s();
 	println!("Done training in {:}.", time_format(build_time.clone()));
 	
-	let nprobe_vals = logspace(k, 1000*k, 21);
+	let nprobe_vals = logspace(k, 10*k, 11);
 	let nprobe_groups: Vec<Vec<usize>> = nprobe_vals.clone().into_iter().rev().combinations(n_bitss.len()).collect();
 	let bin_eval = BinarizationEvaluator::new();
 	for nprobes in nprobe_groups.iter() {
@@ -317,10 +317,163 @@ fn run_experiment(
 	Ok(())
 }
 
+
+fn run_experiment_single(
+	in_base_path: &str,
+	out_base_path: &str,
+	kind: &str,
+	key: &str,
+	size: &str,
+	k: usize,
+	ram_mode: bool,
+	n_bits: usize,
+	n_its: usize,
+	sample_size: usize,
+	its_per_sample: usize,
+	noise_std: f32,
+) -> NoRes {
+	println!("Running {}", kind);
+	ensure_files_available(in_base_path, kind, size)?;
+
+	assert!(ram_mode);
+
+	let data_path = dataset_path(in_base_path, kind, size);
+	let queries_path = queries_path(in_base_path, kind, size);
+	let data_file: H5PyDataset<f32> = H5PyDataset::new(data_path.as_str(), key);
+	let queries_file: H5PyDataset<f32> = H5PyDataset::new(queries_path.as_str(), key);
+	// let data_shape = get_h5py_shape(data_path.as_str(), key)?;
+	// let queries_shape = get_h5py_shape(queries_path.as_str(), key)?;
+	let data_shape = [data_file.n_rows(), data_file.n_cols()];
+	let queries_shape = [queries_file.n_rows(), queries_file.n_cols()];
+
+
+	/* Training */
+	println!("Training index on {:?} with {:?} bits",data_shape,n_bits);
+	let build_timer = Timer::new();
+	/* Creating string handle for experiment */
+	let index_identifier = format!(
+		"StochasticHIOB(n_bits=[{:?}],n_its={:},n_samples={:},batch_its={:},noise_std={:})",
+		n_bits,
+		n_its,
+		sample_size,
+		its_per_sample,
+		noise_std
+	);
+	/* Loading data */
+	let data_load_timer = Timer::new();
+	// let data = read_h5py_source(data_path.as_str(), key, 300_000)?;
+	let data = read_h5py_source(&data_file, 300_000);
+	println!("Data loaded in {:}", data_load_timer.elapsed_str());
+	/* Training HIOB */
+	let init_timer = Timer::new();
+	let mut h: StochasticHIOB<f32, u64, &Array2<f32>> = StochasticHIOB::new(
+		&data,
+		sample_size,
+		its_per_sample,
+		n_bits,
+		None,
+		Some(0.1),
+		None,
+		None,
+		Some(true),
+		None,
+		None,
+		if noise_std > 0f32 { Some(noise_std) } else { None },
+	);
+	println!("Stochastic HIOB initialized in {:}", init_timer.elapsed_str());
+	let init_timer = Timer::new();
+	h.run(n_its);
+	println!("Stochastic HIOB trained in {:}", init_timer.elapsed_str());
+	let init_timer = Timer::new();
+	let data_bin = h.binarize(&data);
+	println!("Data binarized in {:}", init_timer.elapsed_str());
+	let build_time = build_timer.elapsed_s();
+	println!("Done training in {:}.", time_format(build_time.clone()));
+	
+	let nprobe_vals = logspace(k, 10*k, 11);
+	let max_nprobes = nprobe_vals.iter().max().unwrap();
+	let bin_eval = BinarizationEvaluator::new();
+	println!("Starting search on {:?}", queries_shape);
+	let query_timer = Timer::new();
+	/* Loading queries */
+	let queries_load_timer = Timer::new();
+	let queries = read_h5py_source(&queries_file, 300_000);
+	// let queries = read_h5py_source(queries_path.as_str(), key, 300_000)?;
+	println!("Queries loaded in {:}", queries_load_timer.elapsed_str());
+	/* Binarize queries */
+	let queries_bin_timer = Timer::new();
+	let queries_bin: Array2<u64> = h.binarize(&queries);
+	println!("Queries binarized in {:}", queries_bin_timer.elapsed_str());
+	/* Precompute candidates for all nprobes */
+	let query_call_timer = Timer::new();
+	let chunk_size = (queries_shape[0]+num_threads()*2-1)/(num_threads()*2);
+	let (_, all_candidates) = bin_eval.brute_force_k_smallest_hamming(&data_bin, &queries_bin, *max_nprobes, Some(chunk_size));
+	println!("Candidates precomputed in {:}", query_call_timer.elapsed_str());
+	for nprobes in nprobe_vals.iter() {
+		println!("Refining with nprobes={:?}", nprobes);
+		/* Perform query */
+		let query_call_timer = Timer::new();
+		let (mut neighbor_dists, mut neighbor_ids) = bin_eval.refine(
+			&data,
+			&queries,
+			&all_candidates.slice_axis(Axis(1),Slice::from(0..*nprobes)),
+			k,
+			Some(chunk_size),
+		);
+		println!("Queries executed in {:}", query_call_timer.elapsed_str());
+		/* Modify dot products to euclidean distances and change to 1-based index */
+		neighbor_dists.mapv_inplace(|v| 0f32.max(2f32-2f32*v).sqrt());
+		neighbor_ids.mapv_inplace(|v| v+1);
+		let query_time = query_timer.elapsed_s();
+		println!("Overall query time: {:}", time_format(query_time.clone()));
+		/* Create parameter string and store results */
+		let param_string = format!(
+			"index_params=({:}),query_params=(nprobe=[{:?}])",
+			format!(
+				"scale%={:},its_per_sample={:}",
+				<usize as NumCast>::from(h.get_scale()*100f32).unwrap(),
+				its_per_sample,
+			),
+			nprobes,
+		);
+		let out_file = result_path(out_base_path, kind, size, index_identifier.as_str(), param_string.as_str());
+		let storage_timer = Timer::new();
+		store_results(
+			out_file.as_str(),
+			kind,
+			size,
+			format!("{} + brute-force", index_identifier).as_str(),
+			param_string.as_str(),
+			neighbor_dists,
+			neighbor_ids,
+			&data_bin,
+			&queries_bin,
+			build_time,
+			query_time,
+		)?;
+		println!("Wrote results to disk in {:}", storage_timer.elapsed_str());
+	}
+	Ok(())
+}
+
 fn main() -> NoRes {
 	let _ = limit_threads(num_cpus::get()-1);
 	let args = Cli::parse();
-	run_experiment(
+	// run_experiment(
+	// 	args.in_path.as_str(),
+	// 	args.out_path.as_str(),
+	// 	"clip768v2",
+	// 	"emb",
+	// 	args.size.as_str(),
+	// 	args.k,
+	// 	args.ram,
+	// 	&args.bits.split(",").map(|v| usize::from_str(v.trim()).unwrap()).collect::<Vec<usize>>(),
+	// 	args.its,
+	// 	args.samples,
+	// 	args.batch_its,
+	// 	args.noise,
+	// )?;
+	run_experiment_single(
 		args.in_path.as_str(),
 		args.out_path.as_str(),
 		"clip768v2",
@@ -328,7 +481,7 @@ fn main() -> NoRes {
 		args.size.as_str(),
 		args.k,
 		args.ram,
-		&args.bits.split(",").map(|v| usize::from_str(v.trim()).unwrap()).collect::<Vec<usize>>(),
+		args.bits.split(",").map(|v| usize::from_str(v.trim()).unwrap()).collect::<Vec<usize>>()[0],
 		args.its,
 		args.samples,
 		args.batch_its,
