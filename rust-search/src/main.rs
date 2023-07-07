@@ -461,8 +461,9 @@ fn run_experiment_single(
 }
 
 fn main() -> NoRes {
-	let _ = limit_threads(num_cpus::get()-1);
 	let args = Cli::parse();
+	assert!(args.idle_cpus < num_cpus::get());
+	let _ = limit_threads(num_cpus::get()-args.idle_cpus);
 	let probe_vals = logspace(args.probe_min, args.probe_max, args.probe_steps);
 	if args.tune {
 		println!("Running hyperparameter tuning mode with probes {:?}", probe_vals);

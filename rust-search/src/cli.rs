@@ -44,5 +44,8 @@ pub struct Cli {
 	/// Whether or not to run in hyperparameter tuning mode
 	#[arg(long, default_value_t=false)]
 	pub tune: bool,
+	/// Number of virtual cores *not* to use by this program
+	#[arg(long, default_value_t=0)]
+	pub idle_cpus: usize,
 }
 
