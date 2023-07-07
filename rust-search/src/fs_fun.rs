@@ -24,8 +24,8 @@ pub fn download_if_missing(file_url: &str, file_path: &str) -> NoRes {
 		println!("downloading '{}' -> '{}'...", file_url, file_path);
 		let response = reqwest::blocking::get(file_url)?;
 		let mut dest = File::create(file_path)?;
-		let content =  response.text()?;
-		copy(&mut content.as_bytes(), &mut dest)?;
+		let mut content =  std::io::Cursor::new(response.bytes()?);
+		copy(&mut content, &mut dest)?;
 		Ok(())
 	}
 }

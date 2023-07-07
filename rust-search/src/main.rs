@@ -47,10 +47,14 @@ fn ensure_files_available(in_base_path: &str, kind: &str, size: &str) -> NoRes {
 		format!("{}/public-queries-10k-{}.h5", base_url, kind),
 		format!("{}/laion2B-en-{}-n={}.h5", base_url, kind, size),
 	];
-	for (version,url) in versions.iter().zip(urls.iter()) {
+	let targets = vec![
+		queries_path(in_base_path, kind),
+		dataset_path(in_base_path, kind, size),
+	];
+	for (version,(url, target)) in versions.iter().zip(urls.iter().zip(targets.iter())) {
 		download_if_missing(
 			url,
-			format!("{}/{}/{}/{}.h5", in_base_path, kind, size, version).as_str()
+			target,
 		)?
 	};
 	Ok(())
@@ -58,8 +62,8 @@ fn ensure_files_available(in_base_path: &str, kind: &str, size: &str) -> NoRes {
 fn dataset_path(in_base_path: &str, kind: &str, size: &str) -> String {
 	format!("{}/{}/{}/dataset.h5", in_base_path, kind, size)
 }
-fn queries_path(in_base_path: &str, kind: &str, size: &str) -> String {
-	format!("{}/{}/{}/query.h5", in_base_path, kind, size)
+fn queries_path(in_base_path: &str, kind: &str) -> String {
+	format!("{}/{}/query.h5", in_base_path, kind)
 }
 fn result_path(out_base_path: &str, kind: &str, size: &str, index_identifier: &str, param_string: &str) -> String {
 	format!("{}/{}/{}/{}/{}.h5", out_base_path, kind, size, index_identifier, param_string)
@@ -195,7 +199,7 @@ fn run_experiment(
 	assert!(ram_mode);
 
 	let data_path = dataset_path(in_base_path, kind, size);
-	let queries_path = queries_path(in_base_path, kind, size);
+	let queries_path = queries_path(in_base_path, kind);
 	let data_file: H5PyDataset<f32> = H5PyDataset::new(data_path.as_str(), key);
 	let queries_file: H5PyDataset<f32> = H5PyDataset::new(queries_path.as_str(), key);
 	// let data_shape = get_h5py_shape(data_path.as_str(), key)?;
@@ -339,7 +343,7 @@ fn run_experiment_single(
 	assert!(ram_mode);
 
 	let data_path = dataset_path(in_base_path, kind, size);
-	let queries_path = queries_path(in_base_path, kind, size);
+	let queries_path = queries_path(in_base_path, kind);
 	let data_file: H5PyDataset<f32> = H5PyDataset::new(data_path.as_str(), key);
 	let queries_file: H5PyDataset<f32> = H5PyDataset::new(queries_path.as_str(), key);
 	// let data_shape = get_h5py_shape(data_path.as_str(), key)?;
