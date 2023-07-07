@@ -2,40 +2,38 @@ name: System setup
 
 on:
   workflow_call:
+    inputs:
+      os:
+        description: "What OS to set up"
+        required: true
+        default: "ubuntu-latest"
+        type: string
+      pyversion:
+        description: "What Python version to use"
+        required: true
+        default: "3.11.2"
+        type: string
 
 jobs:
   main:
-    name: System setup (${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        version:
-          - '1.8'
-        os:
-          - ubuntu-latest
-        arch:
-          - x64
-        exclude:
-          - os: macOS-latest
-            arch: x86
-        python-version: ["3.11.2"]
+    name: System setup (${{ inputs.os }} with Python ${{ inputs.pyversion }})
+    runs-on: ${{ inputs.os }}
     steps:
       - uses: actions/checkout@v3
         with:
           submodules: 'true'
-      - name: Set up Python 3.11.2
+      - name: Set up Python ${{ inputs.pyversion }}
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ inputs.pyversion }}
       - uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ inputs.pyversion }}
       - name: Create conda environment
         shell: bash -el {0}
         run: |
-          conda create -n hiob python=3.11.2
+          conda create -n hiob python=${{ inputs.pyversion }}
       - name: Install dependencies
         shell: bash -el {0}
         run: |
