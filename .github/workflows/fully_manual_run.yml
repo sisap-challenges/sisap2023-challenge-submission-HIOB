@@ -74,10 +74,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
       - uses: ./.github/actions/system_setup
         with:
-          os: ${{ matrix.os }}
-          pyversion: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python-version }}
       - name: Run benchmark (tuning)
         if: ${{ inputs.tuning }}
         shell: bash -el {0}
@@ -105,4 +106,5 @@ jobs:
             --noise ${{ inputs.noise }}
       - uses: ./.github/actions/evaluation
         with:
+          os: ${{ matrix.os }}
           size: ${{ inputs.size }}
