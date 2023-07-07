@@ -461,6 +461,7 @@ fn main() -> NoRes {
 	let args = Cli::parse();
 	let probe_vals = logspace(args.probe_min, args.probe_max, args.probe_steps);
 	if args.tune {
+		println!("Running hyperparameter tuning mode with probes {:?}", probe_vals);
 		run_experiment_single(
 			args.in_path.as_str(),
 			args.out_path.as_str(),
@@ -477,6 +478,7 @@ fn main() -> NoRes {
 			&probe_vals,
 		)?;
 	} else {
+		println!("Running \"production\" mode with probes {:?}", probe_vals);
 		run_experiment(
 			args.in_path.as_str(),
 			args.out_path.as_str(),
