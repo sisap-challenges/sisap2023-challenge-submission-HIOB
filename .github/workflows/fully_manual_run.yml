@@ -1,0 +1,104 @@
+name: Manual run
+
+on:
+  workflow_dispatch:
+    inputs:
+      size:
+        description: "What dataset size to run experiments for"
+        required: true
+        default: "100K"
+        type: choice
+        options:
+          - 100K
+          - 300K
+          - 10M
+          - 30M
+          - 100M
+      training_iterations:
+        description: "Number of training iterations for HIOB"
+        required: true
+        default: 300000
+        type: number
+      tuning:
+        description: "Whether to run in hyperparameter tuning mode"
+        required: true
+        default: true
+        type: bool
+      k:
+        description: "Number of neighbors to search. Must be in [0,100]"
+        required: true
+        default: 10
+        type: number
+      nprobe_min:
+        description: "Minimum number of probes on hamming distance"
+        required: true
+        default: 10
+        type: number
+      nprobe_max:
+        description: "Maximum number of probes on hamming distance"
+        required: true
+        default: 100
+        type: number
+      nprobe_steps:
+        description: "Number of logarithmically interpolated probe numbers including min and max"
+        required: true
+        default: 11
+        type: number
+      bits:
+        description: "Number of bits to use in binarization. Should be a multiple of 64"
+        required: true
+        default: 1024
+        type: number
+      noise:
+        description: "Standard deviation of noise to add to the stochastic subsamples"
+        required: true
+        default: 0.1
+        type: number
+
+jobs:
+  test:
+    name: Manual run
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '1.8'
+        os:
+          - ubuntu-latest
+        arch:
+          - x64
+        exclude:
+          - os: macOS-latest
+            arch: x86
+        python-version: ["3.11.2"]
+    steps:
+      - uses: ./.github/workflows/system_setup.yml
+      - name: Run benchmark (tuning)
+        if: ${{ inputs.tuning }}
+        shell: bash -el {0}
+        run: |
+          conda activate hiob
+          rust-search/target/release/rust-search \
+            -i data -o result \
+            --its ${{ inputs.training_iterations }} \
+            --k ${{ inputs.k }} \
+            --size ${{ inputs.size }} \
+            --bits ${{ inputs.bits }} \
+            --noise ${{ inputs.noise }} \
+            --tune
+      - name: Run benchmark (no tuning)
+        if: ${{ !inputs.tuning }}
+        shell: bash -el {0}
+        run: |
+          conda activate hiob
+          rust-search/target/release/rust-search \
+            -i data -o result \
+            --its ${{ inputs.training_iterations }} \
+            --k ${{ inputs.k }} \
+            --size ${{ inputs.size }} \
+            --bits ${{ inputs.bits }} \
+            --noise ${{ inputs.noise }}
+      - uses: ./.github/workflows/result_evaluation.yml
+        with:
+          size: ${{ inputs.size }}

@@ -38,7 +38,7 @@ type NoRes = Res<()>;
 // Download all missing files for a specified format and size
 fn ensure_files_available(in_base_path: &str, kind: &str, size: &str) -> NoRes {
 	let base_url = if PRODUCTION_MODE {
-		"https://sisap-23-challenge.s3.amazonaws.com/SISAP23-Challenge"
+		"http://sisap-23-challenge.s3.amazonaws.com/SISAP23-Challenge"
 	} else {
 		"http://ingeotec.mx/~sadit/metric-datasets/LAION/SISAP23-Challenge"
 	};

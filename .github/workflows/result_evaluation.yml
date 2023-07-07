@@ -1,0 +1,47 @@
+name: Result evaluation
+
+on:
+  workflow_call:
+    inputs:
+      size:
+        description: "What dataset size to run experiments for"
+        required: true
+        default: "100K"
+        type: choice
+        options:
+          - 100K
+          - 300K
+          - 10M
+          - 30M
+          - 100M
+
+jobs:
+  main:
+    name: Evaluation for size = ${{ inputs.size }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '1.8'
+        os:
+          - ubuntu-latest
+        arch:
+          - x64
+        exclude:
+          - os: macOS-latest
+            arch: x86
+        python-version: ["3.11.2"]
+    steps:
+      - name: Evaluate results
+        shell: bash -el {0}
+        run: |
+          conda activate hiob
+          python3 eval/eval.py
+          python3 eval/plot.py --size ${{ inputs.size }} res.csv
+      - uses: actions/upload-artifact@v3
+        with:
+          name: Results on ${{ inputs.size }}
+          path: | 
+            res.csv
+            result_${{ inputs.size }}.png
