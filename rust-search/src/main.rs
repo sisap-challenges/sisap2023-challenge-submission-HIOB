@@ -420,12 +420,11 @@ fn run_experiment_single(
 			k,
 			Some(chunk_size),
 		);
-		println!("Queries executed in {:}", query_call_timer.elapsed_str());
+		let query_call_time = query_call_timer.elapsed_s();
+		println!("Queries executed in {:}", time_format(query_call_time.clone()));
 		/* Modify dot products to euclidean distances and change to 1-based index */
 		neighbor_dists.mapv_inplace(|v| 0f32.max(2f32-2f32*v).sqrt());
 		neighbor_ids.mapv_inplace(|v| v+1);
-		let query_time = query_timer.elapsed_s();
-		println!("Overall query time: {:}", time_format(query_time.clone()));
 		/* Create parameter string and store results */
 		let param_string = format!(
 			"index_params=({:}),query_params=(nprobe=[{:?}])",
@@ -449,10 +448,11 @@ fn run_experiment_single(
 			&data_bin,
 			&queries_bin,
 			build_time,
-			query_time,
+			query_call_time,
 		)?;
 		println!("Wrote results to disk in {:}", storage_timer.elapsed_str());
 	}
+	println!("Overall query time: {:}", query_timer.elapsed_str());
 	Ok(())
 }
 
