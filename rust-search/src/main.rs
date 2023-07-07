@@ -187,6 +187,7 @@ fn run_experiment(
 	sample_size: usize,
 	its_per_sample: usize,
 	noise_std: f32,
+	nprobe_vals: &Vec<usize>,
 ) -> NoRes {
 	println!("Running {}", kind);
 	ensure_files_available(in_base_path, kind, size)?;
@@ -252,7 +253,6 @@ fn run_experiment(
 	let build_time = build_timer.elapsed_s();
 	println!("Done training in {:}.", time_format(build_time.clone()));
 	
-	let nprobe_vals = logspace(k, 10*k, 11);
 	let nprobe_groups: Vec<Vec<usize>> = nprobe_vals.clone().into_iter().rev().combinations(n_bitss.len()).collect();
 	let bin_eval = BinarizationEvaluator::new();
 	for nprobes in nprobe_groups.iter() {
@@ -331,6 +331,7 @@ fn run_experiment_single(
 	sample_size: usize,
 	its_per_sample: usize,
 	noise_std: f32,
+	nprobe_vals: &Vec<usize>,
 ) -> NoRes {
 	println!("Running {}", kind);
 	ensure_files_available(in_base_path, kind, size)?;
@@ -390,7 +391,6 @@ fn run_experiment_single(
 	let build_time = build_timer.elapsed_s();
 	println!("Done training in {:}.", time_format(build_time.clone()));
 	
-	let nprobe_vals = logspace(k, 10*k, 11);
 	let max_nprobes = nprobe_vals.iter().max().unwrap();
 	let bin_eval = BinarizationEvaluator::new();
 	println!("Starting search on {:?}", queries_shape);
@@ -459,33 +459,39 @@ fn run_experiment_single(
 fn main() -> NoRes {
 	let _ = limit_threads(num_cpus::get()-1);
 	let args = Cli::parse();
-	// run_experiment(
-	// 	args.in_path.as_str(),
-	// 	args.out_path.as_str(),
-	// 	"clip768v2",
-	// 	"emb",
-	// 	args.size.as_str(),
-	// 	args.k,
-	// 	args.ram,
-	// 	&args.bits.split(",").map(|v| usize::from_str(v.trim()).unwrap()).collect::<Vec<usize>>(),
-	// 	args.its,
-	// 	args.samples,
-	// 	args.batch_its,
-	// 	args.noise,
-	// )?;
-	run_experiment_single(
-		args.in_path.as_str(),
-		args.out_path.as_str(),
-		"clip768v2",
-		"emb",
-		args.size.as_str(),
-		args.k,
-		args.ram,
-		args.bits.split(",").map(|v| usize::from_str(v.trim()).unwrap()).collect::<Vec<usize>>()[0],
-		args.its,
-		args.samples,
-		args.batch_its,
-		args.noise,
-	)?;
+	let probe_vals = logspace(args.probe_min, args.probe_max, args.probe_steps);
+	if args.tune {
+		run_experiment_single(
+			args.in_path.as_str(),
+			args.out_path.as_str(),
+			"clip768v2",
+			"emb",
+			args.size.as_str(),
+			args.k,
+			args.ram,
+			args.bits.split(",").map(|v| usize::from_str(v.trim()).unwrap()).collect::<Vec<usize>>()[0],
+			args.its,
+			args.samples,
+			args.batch_its,
+			args.noise,
+			&probe_vals,
+		)?;
+	} else {
+		run_experiment(
+			args.in_path.as_str(),
+			args.out_path.as_str(),
+			"clip768v2",
+			"emb",
+			args.size.as_str(),
+			args.k,
+			args.ram,
+			&args.bits.split(",").map(|v| usize::from_str(v.trim()).unwrap()).collect::<Vec<usize>>(),
+			args.its,
+			args.samples,
+			args.batch_its,
+			args.noise,
+			&probe_vals,
+		)?;
+	}
 	Ok(())
 }

@@ -32,5 +32,17 @@ pub struct Cli {
 	/// Standard deviation of noise to add to stochastic subsamples
 	#[arg(long, default_value_t=0.0)]
 	pub noise: f32,
+	/// Minimum number of probes to evaluate in queries
+	#[arg(long, default_value_t=10)]
+	pub probe_min: usize,
+	/// Maximum number of probes to evaluate in queries
+	#[arg(long, default_value_t=100)]
+	pub probe_max: usize,
+	/// Number of probe values (logarithmically interpolated) to evaluate in queries including min and max probes
+	#[arg(long, default_value_t=11)]
+	pub probe_steps: usize,
+	/// Whether or not to run in hyperparameter tuning mode
+	#[arg(long, default_value_t=false)]
+	pub tune: bool,
 }
 
