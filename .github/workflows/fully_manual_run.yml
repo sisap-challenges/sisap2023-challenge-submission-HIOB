@@ -106,5 +106,4 @@ jobs:
             --noise ${{ inputs.noise }}
       - uses: ./.github/actions/evaluation
         with:
-          os: ${{ matrix.os }}
           size: ${{ inputs.size }}
