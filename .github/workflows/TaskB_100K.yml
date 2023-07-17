@@ -39,7 +39,7 @@ jobs:
           conda activate hiob
           rust-search/target/release/rust-search \
             -i data -o result \
-            --its 30000 \
+            --its 300000 \
             --k ${{ inputs.k }} \
             --size 100K \
             --bits 1024 \

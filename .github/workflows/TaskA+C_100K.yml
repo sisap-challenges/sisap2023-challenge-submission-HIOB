@@ -39,13 +39,13 @@ jobs:
           conda activate hiob
           rust-search/target/release/rust-search \
             -i data -o result \
-            --its 30000 \
+            --its 300000 \
             --k ${{ inputs.k }} \
             --size 100K \
             --bits 512 \
             --noise 0.2 \
-            --probe-min 110 \
-            --probe-max 130 \
+            --probe-min 90 \
+            --probe-max 110 \
             --probe-steps 2
       - uses: ./.github/actions/evaluation
         with:
