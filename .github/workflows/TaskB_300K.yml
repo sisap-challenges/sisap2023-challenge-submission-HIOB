@@ -1,4 +1,4 @@
-name: Manual run
+name: Task B (300K)
 
 on:
   workflow_dispatch:
